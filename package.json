@@ -1,0 +1,26 @@
+{
+  "name": "athlete-readiness-dashboard",
+  "version": "1.0.0",
+  "description": "A full-stack web app to log daily recovery + training metrics and visualize readiness trends.",
+  "main": "index.js",
+ "scripts": {
+  "dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend\"",
+  "dev:backend": "cd backend && node server.js",
+  "dev:frontend": "cd frontend && npm run dev"
+},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/emilyboyken/athlete-readiness-dashboard.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/emilyboyken/athlete-readiness-dashboard/issues"
+  },
+  "homepage": "https://github.com/emilyboyken/athlete-readiness-dashboard#readme",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
