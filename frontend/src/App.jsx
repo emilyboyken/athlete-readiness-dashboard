@@ -1,3 +1,4 @@
+
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Chart as ChartJS,
@@ -7,10 +8,11 @@ import {
   LineElement,
   Tooltip,
   Legend,
+  Title,
 } from "chart.js";
 import { Line } from "react-chartjs-2";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Title);
 
 function clampNum(v, min, max) {
   const n = Number(v);
@@ -25,7 +27,62 @@ function todayISO() {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
+function pearsonCorrelation(x, y) {
+  if (!x.length || x.length !== y.length) return null;
+  const n = x.length;
+  if (n < 2) return null;
 
+  const meanX = x.reduce((a, b) => a + b, 0) / n;
+  const meanY = y.reduce((a, b) => a + b, 0) / n;
+
+  let num = 0;
+  let denX = 0;
+  let denY = 0;
+
+  for (let i = 0; i < n; i++) {
+    const dx = x[i] - meanX;
+    const dy = y[i] - meanY;
+    num += dx * dy;
+    denX += dx * dx;
+    denY += dy * dy;
+  }
+
+  const den = Math.sqrt(denX * denY);
+  if (den === 0) return null;
+  return num / den;
+}
+
+function linearRegression(x, y) {
+  if (!x.length || x.length !== y.length) return null;
+  const n = x.length;
+  if (n < 2) return null;
+
+  const meanX = x.reduce((a, b) => a + b, 0) / n;
+  const meanY = y.reduce((a, b) => a + b, 0) / n;
+
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = x[i] - meanX;
+    num += dx * (y[i] - meanY);
+    den += dx * dx;
+  }
+  if (den === 0) return null;
+
+  const slope = num / den;
+  const intercept = meanY - slope * meanX;
+  return { slope, intercept };
+}
+
+function corrLabel(r) {
+  if (r === null) return "Not enough data";
+  const a = Math.abs(r);
+  if (a < 0.2) return "Very weak";
+  if (a < 0.4) return "Weak";
+  if (a < 0.6) return "Moderate";
+  if (a < 0.8) return "Strong";
+  return "Very strong";
+}
 export default function App() {
   const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(false);
@@ -83,6 +140,7 @@ async function loadCheckins() {
     const sortedAsc = [...checkins].sort((a, b) => (a.date > b.date ? 1 : -1));
     return sortedAsc.slice(Math.max(0, sortedAsc.length - days));
   }, [checkins, days]);
+  
 
   const chartData = useMemo(() => {
     return {
@@ -103,7 +161,82 @@ async function loadCheckins() {
       ],
     };
   }, [slicedForChart]);
+const loads = useMemo(() => slicedForChart.map((r) => Number(r.training_load)).filter((v) => Number.isFinite(v)), [slicedForChart]);
+const readinessVals = useMemo(() => slicedForChart.map((r) => Number(r.readiness)).filter((v) => Number.isFinite(v)), [slicedForChart]);
 
+// Keep paired points only (in case any row missing)
+const paired = useMemo(() => {
+  const pts = [];
+  for (const row of slicedForChart) {
+    const x = Number(row.training_load);
+    const y = Number(row.readiness);
+    if (Number.isFinite(x) && Number.isFinite(y)) pts.push({ x, y });
+  }
+  return pts;
+}, [slicedForChart]);
+
+const rValue = useMemo(() => {
+  if (paired.length < 2) return null;
+  const x = paired.map((p) => p.x);
+  const y = paired.map((p) => p.y);
+  return pearsonCorrelation(x, y);
+}, [paired]);
+
+const reg = useMemo(() => {
+  if (paired.length < 2) return null;
+  const x = paired.map((p) => p.x);
+  const y = paired.map((p) => p.y);
+  return linearRegression(x, y);
+}, [paired]);
+
+const scatterData = useMemo(() => {
+  if (!paired.length) return null;
+
+  let linePts = [];
+  if (reg) {
+    const xs = paired.map((p) => p.x);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    linePts = [
+      { x: minX, y: reg.slope * minX + reg.intercept },
+      { x: maxX, y: reg.slope * maxX + reg.intercept },
+    ];
+  }
+
+  return {
+    datasets: [
+      {
+        label: "Sessions",
+        data: paired,
+        showLine: false,
+      },
+      ...(linePts.length
+        ? [
+            {
+              label: "Trendline",
+              data: linePts,
+              showLine: true,
+              pointRadius: 0,
+            },
+          ]
+        : []),
+    ],
+  };
+}, [paired, reg]);
+
+const scatterOptions = useMemo(() => {
+  return {
+    responsive: true,
+    plugins: {
+      legend: { position: "top" },
+      title: { display: true, text: "Training Load vs Readiness" },
+    },
+    scales: {
+      x: { title: { display: true, text: "Training Load (RPE × minutes)" } },
+      y: { title: { display: true, text: "Readiness (0–100)" }, min: 0, max: 100 },
+    },
+  };
+}, []);
   const chartOptions = useMemo(() => {
     return {
       responsive: true,
@@ -288,13 +421,17 @@ async function loadCheckins() {
             <div style={{ color: "#6b7280", marginTop: 6 }}>Load = RPE × minutes</div>
           </div>
 
-          <div style={cardStyle}>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>Entries</div>
-            <div style={{ fontSize: 36, fontWeight: 700, marginTop: 6 }}>{checkins.length}</div>
-            <div style={{ color: "#6b7280", marginTop: 6 }}>
-              {loading ? "Syncing…" : "Stored in SQLite via your API"}
-            </div>
-          </div>
+<div style={cardStyle}>
+  <div style={{ fontSize: 12, color: "#6b7280" }}>Load ↔ Readiness correlation</div>
+  <div style={{ fontSize: 36, fontWeight: 700, marginTop: 6 }}>
+    {rValue === null ? "—" : rValue.toFixed(2)}
+  </div>
+  <div style={{ color: "#6b7280", marginTop: 6 }}>
+    {rValue === null
+      ? "Need at least 2 check-ins in this range."
+      : `${corrLabel(rValue)} (${rValue < 0 ? "negative" : "positive"})`}
+  </div>
+</div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 12, marginTop: 12 }}>
@@ -321,6 +458,16 @@ async function loadCheckins() {
                 <div style={{ color: "#6b7280", padding: 12 }}>No data yet — submit a check-in to see charts.</div>
               )}
             </div>
+<div style={{ marginTop: 20 }}>
+  {scatterData ? (
+    <Line data={scatterData} options={scatterOptions} />
+  ) : (
+    <div style={{ color: "#6b7280", padding: 12 }}>
+      Add more check-ins to see correlation + trendline.
+    </div>
+  )}
+</div>
+
           </div>
 
           <div style={cardStyle}>
